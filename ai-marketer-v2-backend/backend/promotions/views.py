@@ -168,6 +168,22 @@ class PromotionViewSet(viewsets.ModelViewSet):
         if not business:
             return Response({"error": "Business not found"}, status=status.HTTP_404_NOT_FOUND)
         
+        # Check if business has sales data in the last 30 days
+        start_date = datetime.now(timezone('UTC')) - timedelta(days=30)
+        end_date = datetime.now(timezone('UTC'))
+        
+        sales_data = SalesDataPoint.objects.filter(
+            business_id=business.id, 
+            date__range=[start_date, end_date]
+        )
+        
+        if not sales_data.exists():
+            logger.info(f"No sales data found for business {business.id} in the last 30 days")
+            
+            return Response({
+                "error": "No sales data found for the last 30 days.",
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         # Auto-archive old suggestions to ensure there's room for new ones
         self._auto_archive_suggestions(business)
 
@@ -285,19 +301,30 @@ class PromotionViewSet(viewsets.ModelViewSet):
         This function calculates total revenue and units sold for each product, ranks them, and classifies the top and bottom 10% as high-performing or low-performing respectively.
         It also evaluates recent sales trends (upward, downward, or flat) for each product using exponential moving average (EMA).
         """
+        logger.info(f"Starting _get_products_performance for business {business.id}")
+
         # Get Square data
         square_data = get_square_menu_items(business)
+        logger.info(f"Square data retrieved: {square_data.get('square_connected', False)}")
 
         # Calculate the date range
         start_date = datetime.now(timezone('UTC')) - timedelta(days)
         end_date = datetime.now(timezone('UTC'))
+        logger.info(f"Date range: {start_date} to {end_date}")
 
         # Filter the sales data based on the given date range
         sales_data = SalesDataPoint.objects.filter(business_id=business.id, date__range=[start_date, end_date])
+        sales_count = sales_data.count()
+        logger.info(f"Sales data count: {sales_count}")
+        
+        if not sales_data.exists():
+            logger.error(f"No sales data found for business {business.id}, using fallback product data")
         
         # Group the data by product_name and calculate total revenue and units sold
         grouped = sales_data.values('product_name') \
             .annotate(total_revenue=Sum('revenue'), total_units=Sum('units_sold'))
+        
+        logger.info(f"Grouped data count: {len(grouped)}")
         
         total = len(grouped)
         top_10_percent = max(int(total * 0.1), 1)
@@ -305,6 +332,8 @@ class PromotionViewSet(viewsets.ModelViewSet):
         
         # Sort products by total revenue in descending order
         sorted_products = sorted(grouped, key=lambda x: x['total_revenue'], reverse=True)
+        logger.info(f"Sorted products count: {len(sorted_products)}")
+
 
         product_names = [product['product_name'] for product in sorted_products]
         
@@ -319,6 +348,7 @@ class PromotionViewSet(viewsets.ModelViewSet):
             name: self._calculate_trend(product_data_map[name])
             for name in product_data_map
         }
+        logger.info(f"Product trends calculated: {len(product_trends)}")
 
         # Assign performance category and trend to each product
         for i, product in enumerate(sorted_products):
@@ -339,8 +369,14 @@ class PromotionViewSet(viewsets.ModelViewSet):
                 product['description_with_price'] = square_data['items'][product['product_name'].lower()]
 
         # Calculate the overall start_date and end_date for the analysis period
-        overall_start_date = sales_data.aggregate(Min('date'))['date__min']
-        overall_end_date = sales_data.aggregate(Max('date'))['date__max']
+        try:
+            overall_start_date = sales_data.aggregate(Min('date'))['date__min']
+            overall_end_date = sales_data.aggregate(Max('date'))['date__max']
+            logger.info(f"Aggregated dates - start: {overall_start_date}, end: {overall_end_date}")
+        except Exception as e:
+            logger.error(f"Error in date aggregation: {e}")
+            overall_start_date = start_date.date()
+            overall_end_date = end_date.date()
 
         result = {
             'start_date': overall_start_date,
@@ -348,6 +384,7 @@ class PromotionViewSet(viewsets.ModelViewSet):
             'products': sorted_products
         }
         
+        logger.info(f"Final result: start_date={result['start_date']}, end_date={result['end_date']}, products_count={len(result['products'])}")
         return result
 
     def _calculate_trend(self, product_data, days=14, smoothing_factor=0.1, threshold=0.05):

@@ -92,11 +92,21 @@ const PromotionsDashboard = () => {
       await mutateSuggestions();
       setActiveView("suggestions");
     } catch (error) {
-      console.error(error);
-      showNotification(
-        "error",
-        "Failed to generate suggestions. Please try again."
-      );
+      let errorMessage = "Failed to generate suggestions. Please try again.";
+
+      if (error instanceof Error) {
+        try {
+          const parsedError = JSON.parse(error.message);
+          if (parsedError?.data?.error) {
+            errorMessage = parsedError.data.error;
+          } else if (parsedError?.statusText) {
+            errorMessage = parsedError.statusText;
+          }
+        } catch (parseError) {
+          console.error("Failed to parse error message:", parseError);
+        }
+      }
+      showNotification("error", errorMessage);
     } finally {
       setIsGenerating(false);
     }

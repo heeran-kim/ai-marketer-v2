@@ -339,24 +339,37 @@ export default function SalesDataUpload() {
 
         <div className="w-full text-sm">
           <div className="h-64">
-            {isLoading ? (
-              <div className="flex justify-center items-center h-full">
-                <p>Loading chart data...</p>
-              </div>
-            ) : data ? (
-              <Line
-                options={chartOptions}
-                data={formatChartData(getActiveChartData())}
-              />
-            ) : (
-              <div className="flex justify-center items-center h-full text-gray-500">
-                <p className="whitespace-pre-line text-center">
-                  {`No sales data available.
-                Please connect Square or upload a file
-                to see your sales chart.`}
-                </p>
-              </div>
-            )}
+            {(() => {
+              const chartData = getActiveChartData();
+
+              if (isLoading) {
+                return (
+                  <div className="flex justify-center items-center h-full">
+                    <p>Loading chart data...</p>
+                  </div>
+                );
+              }
+
+              if (data && chartData?.labels && chartData.labels.length > 0) {
+                return (
+                  <Line
+                    options={chartOptions}
+                    data={formatChartData(chartData)}
+                  />
+                );
+              }
+
+              return (
+                <div className="flex justify-center items-center h-full text-gray-500">
+                  <p className="whitespace-pre-line text-center">
+                    {`No sales data available for the last 30 days.
+                      Please connect Square with recent sales transactions
+                      or upload a CSV file with recent data
+                      to see your sales chart.`}
+                  </p>
+                </div>
+              );
+            })()}
           </div>
 
           {data && !isLoading && (
@@ -372,8 +385,8 @@ export default function SalesDataUpload() {
 
       <Card
         title="Upload Sales Data"
-        description="Upload CSV file with product-level sales data"
-        restriction="Required columns: Date, Product Name, Price, Quantity"
+        description="Upload CSV file with product-level sales data from the last 30 days"
+        restriction="Required columns: Date, Product Name, Price, Quantity. Data should be from the last 30 days for promotion suggestions."
         buttonText={isProcessing ? "Uploading..." : "Upload"}
         onClick={handleSaveFile}
         buttonDisabled={isProcessing || !salesFile}
